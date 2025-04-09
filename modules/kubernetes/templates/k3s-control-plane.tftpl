@@ -1,0 +1,81 @@
+#!/bin/bash
+# K3s Control Plane Installation Script
+
+# Set up logging
+exec > >(tee /var/log/k3s-setup.log) 2>&1
+echo "Starting K3s control plane installation at $(date)"
+
+# Update system
+apt-get update
+apt-get upgrade -y
+
+# Install required packages
+apt-get install -y curl wget open-iscsi nfs-common
+
+# Configure kernel parameters
+cat <<EOF > /etc/sysctl.d/k3s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+EOF
+sysctl --system
+
+# Install K3s server (control plane)
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" sh -s - \
+  --token="${node_token}" \
+  --cluster-cidr="${cluster_cidr}" \
+  --disable traefik \
+  --disable servicelb \
+  --write-kubeconfig-mode 644 \
+  --tls-san $(hostname -I | awk '{print $1}')
+
+# Wait for K3s to be ready
+until kubectl get nodes; do
+  echo "Waiting for K3s to be ready..."
+  sleep 5
+done
+
+# Install MetalLB for load balancing
+cat <<EOF > /var/lib/rancher/k3s/server/manifests/metallb.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metallb-system
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: metallb
+  namespace: kube-system
+spec:
+  chart: metallb
+  repo: https://metallb.github.io/metallb
+  targetNamespace: metallb-system
+  valuesContent: |-
+    configInline:
+      address-pools:
+      - name: default
+        protocol: layer2
+        addresses:
+        - ${cidrhost(cluster_cidr, 100)}-${cidrhost(cluster_cidr, 120)}
+EOF
+
+# Install Longhorn for distributed storage
+cat <<EOF > /var/lib/rancher/k3s/server/manifests/longhorn.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: longhorn-system
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: longhorn
+  namespace: kube-system
+spec:
+  chart: longhorn
+  repo: https://charts.longhorn.io
+  targetNamespace: longhorn-system
+EOF
+
+echo "K3s control plane installation completed at $(date)"

@@ -1,0 +1,76 @@
+#!/bin/bash
+# PostgreSQL Database Initialization Script
+
+# Set up logging
+exec > >(tee /var/log/postgresql-setup.log) 2>&1
+echo "Starting PostgreSQL installation at $(date)"
+
+# Update system
+apt-get update
+apt-get upgrade -y
+
+# Install PostgreSQL
+apt-get install -y postgresql-${engine_version} postgresql-client-${engine_version} postgresql-contrib-${engine_version}
+
+# Format and mount the data volume
+echo "Setting up data volume for PostgreSQL"
+mkfs.ext4 /dev/vdb
+mkdir -p ${storage_mount_point}
+echo "/dev/vdb ${storage_mount_point} ext4 defaults 0 0" >> /etc/fstab
+mount -a
+
+# Set ownership of data directory
+chown -R postgres:postgres ${storage_mount_point}
+
+# Stop PostgreSQL service
+systemctl stop postgresql
+
+# Move PostgreSQL data
+echo "Moving PostgreSQL data to the data volume"
+mv /var/lib/postgresql/${engine_version}/main ${storage_mount_point}/
+ln -s ${storage_mount_point}/main /var/lib/postgresql/${engine_version}/main
+
+# Configure PostgreSQL for remote connections
+cat <<EOF > /etc/postgresql/${engine_version}/main/postgresql.conf
+data_directory = '${storage_mount_point}/main'
+hba_file = '/etc/postgresql/${engine_version}/main/pg_hba.conf'
+ident_file = '/etc/postgresql/${engine_version}/main/pg_ident.conf'
+external_pid_file = '/var/run/postgresql/${engine_version}-main.pid'
+listen_addresses = '*'
+port = 5432
+max_connections = 100
+shared_buffers = 128MB
+dynamic_shared_memory_type = posix
+max_wal_size = 1GB
+min_wal_size = 80MB
+log_timezone = 'UTC'
+datestyle = 'iso, mdy'
+timezone = 'UTC'
+lc_messages = 'en_US.UTF-8'
+lc_monetary = 'en_US.UTF-8'
+lc_numeric = 'en_US.UTF-8'
+lc_time = 'en_US.UTF-8'
+default_text_search_config = 'pg_catalog.english'
+EOF
+
+# Configure access rules
+cat <<EOF > /etc/postgresql/${engine_version}/main/pg_hba.conf
+local   all             postgres                                peer
+local   all             all                                     peer
+host    all             all             127.0.0.1/32            md5
+host    all             all             ::1/128                 md5
+host    all             all             0.0.0.0/0               md5
+EOF
+
+# Start PostgreSQL service
+systemctl start postgresql
+
+# Create database and user
+su - postgres -c "psql -c \"CREATE USER ${db_user} WITH PASSWORD '${db_password}' SUPERUSER;\""
+su - postgres -c "psql -c \"CREATE DATABASE ${db_name} OWNER ${db_user};\""
+su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE ${db_name} TO ${db_user};\""
+
+# Enable and start PostgreSQL on boot
+systemctl enable postgresql
+
+echo "PostgreSQL installation completed at $(date)"

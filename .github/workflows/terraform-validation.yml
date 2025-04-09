@@ -1,0 +1,78 @@
+name: Terraform Validation
+
+on:
+  push:
+    branches: [ main, release-* ]
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - '.github/workflows/terraform-validation.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**/*.tf'
+      - '**/*.tfvars'
+      - '.github/workflows/terraform-validation.yml'
+
+jobs:
+  terraform-lint:
+    name: Lint Terraform Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.0.0
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Install tflint
+        run: |
+          curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash
+
+      - name: Run tflint
+        run: |
+          tflint --recursive
+
+  terraform-security:
+    name: Security Scan Terraform Files
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+
+      - name: Run checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+
+  terraform-compliance:
+    name: Compliance Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install terraform-compliance
+        run: |
+          pip install terraform-compliance
+
+      # This step will need actual compliance files to run against
+      # Placeholder for now
+      - name: Check compliance policies
+        if: false # Disabled until compliance files are created
+        run: |
+          echo "Placeholder for terraform-compliance checks"

@@ -1,0 +1,27 @@
+#!/bin/bash
+# K3s Worker Node Installation Script
+
+# Set up logging
+exec > >(tee /var/log/k3s-setup.log) 2>&1
+echo "Starting K3s worker node installation at $(date)"
+
+# Update system
+apt-get update
+apt-get upgrade -y
+
+# Install required packages
+apt-get install -y curl wget open-iscsi nfs-common
+
+# Configure kernel parameters
+cat <<EOF > /etc/sysctl.d/k3s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+net.ipv4.ip_forward = 1
+EOF
+sysctl --system
+
+# Install K3s agent (worker)
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="${k3s_version}" K3S_URL="https://${control_plane_ip}:6443" K3S_TOKEN="${node_token}" sh -s - \
+  --node-label "${node_labels}"
+
+echo "K3s worker node installation completed at $(date)"
